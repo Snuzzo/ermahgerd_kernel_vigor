@@ -109,6 +109,12 @@ config CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 	  loading your cpufreq low-level hardware driver, using the
 	  'interactive' governor for latency-sensitive workloads.
 
+config CPU_FREQ_DEFAULT_GOV_INTERACTIVEX2
+	bool "interactiveX"
+	select CPU_FREQ_GOV_INTERACTIVEX2
+	help
+	   Use the CPU governor 'interactiveX2' by imoseyon as default.
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -211,6 +217,15 @@ config CPU_FREQ_GOV_CONSERVATIVE
 	  For details, take a look at linux/Documentation/cpu-freq.
 
 	  If in doubt, say N.
+
+config CPU_FREQ_GOV_INTERACTIVEX2
+	tristate "'interactiveX2' cpufreq governor"	
+	depends on CPU_FREQ
+	help
+	select CPU_FREQ
+	   Use the CPU governor 'interactiveX2' by imoseyon as default.
+
+	   If in doubt, say N.
 
 menu "x86 CPU frequency scaling drivers"
 depends on X86
