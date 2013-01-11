@@ -115,6 +115,12 @@ config CPU_FREQ_DEFAULT_GOV_INTERACTIVEX2
 	help
 	   Use the CPU governor 'interactiveX2' by imoseyon as default.
 
+config CPU_FREQ_DEFAULT_GOV_LIONHEART
+	bool "lionheart"
+	select CPU_FREQ_GOV_LIONHEART
+	help
+	   Use the CPU governor 'lionheart' as default.
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -223,7 +229,15 @@ config CPU_FREQ_GOV_INTERACTIVEX2
 	depends on CPU_FREQ
 	help
 	select CPU_FREQ
-	   Use the CPU governor 'interactiveX2' by imoseyon as default.
+	   Use the CPU governor 'interactiveX2' by imoseyon.
+
+	   If in doubt, say N.
+
+config CPU_FREQ_GOV_LIONHEART
+	tristate "'Lionheart' cpufreq governor"
+	depends on CPU_FREQ
+	help
+	   Use the CPU governor 'lionheart'.
 
 	   If in doubt, say N.
 
