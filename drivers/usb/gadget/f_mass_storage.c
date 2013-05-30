@@ -738,112 +738,6 @@ static int sleep_thread(struct fsg_common *common)
 }
 
 
-static void _lba_to_msf(u8 *buf, int lba)
-{
-    lba += 150;
-    buf[0] = (lba / 75) / 60;
-    buf[1] = (lba / 75) % 60;
-    buf[2] = lba % 75;
-}
-
-
-static int _read_toc_raw(struct fsg_common *common, struct fsg_buffhd *bh)
-{
-	struct fsg_lun	*curlun = common->curlun;
-	int		msf = common->cmnd[1] & 0x02;
-	u8		*buf = (u8 *) bh->buf;
-	u8		*q;
-	int		len;
-
-	q = buf + 2;
-	memset(q, 0, 46);
-	*q++ = 1; /* first session */
-	*q++ = 1; /* last session */
-
-	*q++ = 1; /* session number */
-	*q++ = 0x14; /* data track */
-	*q++ = 0; /* track number */
-	*q++ = 0xa0; /* lead-in */
-	*q++ = 0; /* min */
-	*q++ = 0; /* sec */
-	*q++ = 0; /* frame */
-	*q++ = 0;
-	*q++ = 1; /* first track */
-	*q++ = 0x00; /* disk type */
-	*q++ = 0x00;
-
-	*q++ = 1; /* session number */
-	*q++ = 0x14; /* data track */
-	*q++ = 0; /* track number */
-	*q++ = 0xa1;
-	*q++ = 0; /* min */
-	*q++ = 0; /* sec */
-	*q++ = 0; /* frame */
-	*q++ = 0;
-	*q++ = 1; /* last track */
-	*q++ = 0x00;
-	*q++ = 0x00;
-
-	*q++ = 1; /* session number */
-	*q++ = 0x14; /* data track */
-	*q++ = 0; /* track number */
-	*q++ = 0xa2; /* lead-out */
-	*q++ = 0; /* min */
-	*q++ = 0; /* sec */
-	*q++ = 0; /* frame */
-	if (msf) {
-		*q++ = 0; /* reserved */
-		_lba_to_msf(q, curlun->num_sectors);
-		q += 3;
-	} else {
-		put_unaligned_be32(curlun->num_sectors, q);
-		q += 4;
-	}
-
-	*q++ = 1; /* session number */
-	*q++ = 0x14; /* ADR, control */
-	*q++ = 0; /* track number */
-	*q++ = 1; /* point */
-	*q++ = 0; /* min */
-	*q++ = 0; /* sec */
-	*q++ = 0; /* frame */
-	if (msf) {
-		*q++ = 0;
-		_lba_to_msf(q, 0);
-		q += 3;
-	} else {
-		memset(q, 0, 4);
-		q += 4;
-	}
-
-	len = q - buf;
-	put_unaligned_be16(len - 2, buf);
-
-	return len;
-}
-
-
-static void cd_data_to_raw(u8 *buf, int lba)
-{
-	/* sync bytes */
-	buf[0] = 0x00;
-	memset(buf + 1, 0xff, 10);
-	buf[11] = 0x00;
-	buf += 12;
-
-	/* MSF */
-	_lba_to_msf(buf, lba);
-	buf[3] = 0x01; /* mode 1 data */
-	buf += 4;
-
-	/* data */
-	buf += 2048;
-
-	/* XXX: ECC not computed */
-	memset(buf, 0, 288);
-}
-
-
 /*-------------------------------------------------------------------------*/
 
 static int do_read(struct fsg_common *common)
@@ -857,25 +751,15 @@ static int do_read(struct fsg_common *common)
 	unsigned int		amount;
 	unsigned int		partial_page;
 	ssize_t			nread;
-	u32			transfer_request;
 #ifdef CONFIG_USB_MSC_PROFILING
 	ktime_t			start, diff;
 #endif
-
-	if (common->cmnd[0] == READ_CD) {
-		if (common->data_size_from_cmnd == 0)
-			return 0;
-		transfer_request = common->cmnd[9];
-	} else
-		transfer_request = 0;
 
 	/*
 	 * Get the starting Logical Block Address and check that it's
 	 * not too big.
 	 */
-	if (common->cmnd[0] == READ_CD)
-		lba = get_unaligned_be32(&common->cmnd[2]);
-	else if (common->cmnd[0] == READ_6)
+	if (common->cmnd[0] == READ_6)
 		lba = get_unaligned_be24(&common->cmnd[1]);
 	else {
 		lba = get_unaligned_be32(&common->cmnd[2]);
@@ -894,18 +778,10 @@ static int do_read(struct fsg_common *common)
 		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 		return -EINVAL;
 	}
+	file_offset = ((loff_t) lba) << 9;
 
-	if ((transfer_request & 0xf8) == 0xf8) {
-		file_offset = ((loff_t) lba) << 11;
-
-		/* read all data, 2352 byte */
-		amount_left = 2352;
-	} else {
-		file_offset = ((loff_t) lba) << 9;
-
-		/* Carry out the file reads */
-		amount_left = common->data_size_from_cmnd;
-	}
+	/* Carry out the file reads */
+	amount_left = common->data_size_from_cmnd;
 	if (unlikely(amount_left == 0))
 		return -EIO;		/* No default reply */
 
@@ -956,14 +832,9 @@ static int do_read(struct fsg_common *common)
 #ifdef CONFIG_USB_MSC_PROFILING
 		start = ktime_get();
 #endif
-		if ((transfer_request & 0xf8) == 0xf8)
-			nread = vfs_read(curlun->filp,
-				    ((char __user *)bh->buf) + 16,
-				    amount, &file_offset_tmp);
-		else
-			nread = vfs_read(curlun->filp,
-				    (char __user *)bh->buf,
-				    amount, &file_offset_tmp);
+		nread = vfs_read(curlun->filp,
+				 (char __user *)bh->buf,
+				 amount, &file_offset_tmp);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 		     (unsigned long long) file_offset, (int) nread);
 #ifdef CONFIG_USB_MSC_PROFILING
@@ -1006,9 +877,6 @@ static int do_read(struct fsg_common *common)
 			return -EIO;
 		common->next_buffhd_to_fill = bh->next;
 	}
-
-	if ((transfer_request & 0xf8) == 0xf8)
-		cd_data_to_raw(bh->buf, lba);
 
 	return -EIO;		/* No default reply */
 }
@@ -1521,7 +1389,6 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 	struct fsg_lun	*curlun = common->curlun;
 	int		msf = common->cmnd[1] & 0x02;
 	int		start_track = common->cmnd[6];
-	int		format = (common->cmnd[9] & 0xC0) >> 6;
 	u8		*buf = (u8 *)bh->buf;
 
 	if ((common->cmnd[1] & ~0x02) != 0 ||	/* Mask away MSF */
@@ -1529,9 +1396,6 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
 	}
-
-	if (format == 2)
-		return _read_toc_raw(common, bh);
 
 	memset(buf, 0, 20);
 	buf[1] = (20-2);		/* TOC data length */
@@ -1601,7 +1465,7 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 		memset(buf+2, 0, 10);	/* None of the fields are changeable */
 
 		if (!changeable_values) {
-			buf[2] = 0x00;	/* Write cache disable, */
+			buf[2] = 0x04;	/* Write cache enable, */
 					/* Read cache not disabled */
 					/* No cache retention priorities */
 			put_unaligned_be16(0xffff, &buf[4]);
@@ -1746,42 +1610,6 @@ static int do_mode_select(struct fsg_common *common, struct fsg_buffhd *bh)
 	return -EINVAL;
 }
 
-static int do_reserve(struct fsg_common *common, struct fsg_buffhd *bh)
-{
-	int	call_us_ret = -1;
-	char *envp[] = {
-		"HOME=/",
-		"PATH=/sbin:/system/sbin:/system/bin:/system/xbin",
-		NULL,
-	};
-	char *exec_path[2] = {"/system/bin/stop", "/system/bin/start" };
-	char *argv_stop[] = { exec_path[0], "adbd", NULL, };
-	char *argv_start[] = { exec_path[1], "adbd", NULL, };
-
-	if (common->cmnd[1] == ('h'&0x1f) && common->cmnd[2] == 't'
-		&& common->cmnd[3] == 'c') {
-		/* No special options */
-		switch (common->cmnd[5]) {
-		case 0x01: /* enable adbd */
-			call_us_ret = call_usermodehelper(exec_path[1],
-				argv_start, envp, UMH_WAIT_PROC);
-		break;
-		case 0x02: /*disable adbd */
-			call_us_ret = call_usermodehelper(exec_path[0],
-				argv_stop, envp, UMH_WAIT_PROC);
-		break;
-		default:
-			printk(KERN_DEBUG "Unknown hTC specific command..."
-					"(0x%2.2X)\n", common->cmnd[5]);
-		break;
-		}
-	}
-	printk(KERN_NOTICE "%s adb daemon from mass_storage %s(%d)\n",
-		(common->cmnd[5] == 0x01) ? "Enable" :
-		(common->cmnd[5] == 0x02) ? "Disable" : "Unknown",
-		(call_us_ret == 0) ? "DONE" : "FAIL", call_us_ret);
-	return 0;
-}
 
 /*-------------------------------------------------------------------------*/
 
@@ -2125,8 +1953,6 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 			    "but we got %d\n", name,
 			    cmnd_size, common->cmnd_size);
 			cmnd_size = common->cmnd_size;
-		} else if (common->cmnd[0] == RESERVE) {
-			cmnd_size = common->cmnd_size;
 		} else {
 			common->phase_error = 1;
 			return -EINVAL;
@@ -2305,16 +2131,6 @@ static int do_scsi_command(struct fsg_common *common)
 			reply = do_read(common);
 		break;
 
-	case READ_CD:
-		common->data_size_from_cmnd = ((common->cmnd[6] << 16) |
-			    (common->cmnd[7] << 8) | (common->cmnd[8])) << 9;
-		reply = check_command(common, 12, DATA_DIR_TO_HOST,
-			    (0xf<<2) | (7<<7), 1, "READ CD");
-
-		if (reply == 0)
-			reply = do_read(common);
-		break;
-
 	case READ_CAPACITY:
 		common->data_size_from_cmnd = 8;
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
@@ -2342,7 +2158,7 @@ static int do_scsi_command(struct fsg_common *common)
 		common->data_size_from_cmnd =
 			get_unaligned_be16(&common->cmnd[7]);
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
-				      (0xf<<6) | (1<<1), 1,
+				      (7<<6) | (1<<1), 1,
 				      "READ TOC");
 		if (reply == 0)
 			reply = do_read_toc(common, bh);
@@ -2435,15 +2251,6 @@ static int do_scsi_command(struct fsg_common *common)
 			reply = do_write(common);
 		break;
 
-	case RESERVE:
-		common->data_size_from_cmnd = common->cmnd[4];
-		reply = check_command(common, 10, DATA_DIR_TO_HOST,
-				(1<<1) | (0xf<<2) , 0,
-				"RESERVE(6)");
-		if (reply == 0)
-			reply = do_reserve(common, bh);
-		break;
-
 	/*
 	 * Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
@@ -2452,6 +2259,7 @@ static int do_scsi_command(struct fsg_common *common)
 	 */
 	case FORMAT_UNIT:
 	case RELEASE:
+	case RESERVE:
 	case SEND_DIAGNOSTIC:
 		/* Fall through */
 
@@ -3149,9 +2957,9 @@ buffhds_first_it:
 		}
 	}
 	snprintf(common->inquiry_string, sizeof common->inquiry_string,
-		 "%-8s%-16s%04x", cfg->vendor_name ? cfg->vendor_name : "Linux",
+		 "%-8s%-16s%04x", cfg->vendor_name ?: "Linux",
 		 /* Assume product name dependent on the first LUN */
-		 cfg->product_name ? cfg->product_name : (common->luns->cdrom
+		 cfg->product_name ?: (common->luns->cdrom
 				     ? "File-Stor Gadget"
 				     : "File-CD Gadget"),
 		 i);

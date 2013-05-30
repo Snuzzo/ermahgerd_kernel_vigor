@@ -42,6 +42,7 @@
 #include <mach/msm_smd.h>
 #include <mach/sdio_cmux.h>
 #include <mach/sdio_dmux.h>
+#include <mach/usb_gadget_xport.h>
 
 #ifdef CONFIG_RMNET_SMD_SDIO_CTL_CHANNEL
 static uint32_t rmnet_mux_sdio_ctl_ch = CONFIG_RMNET_SMD_SDIO_CTL_CHANNEL;
@@ -102,12 +103,6 @@ struct rmnet_mux_ctrl_pkt {
 	void *buf;
 	int len;
 	struct list_head list;
-};
-
-enum usb_rmnet_mux_xport_type {
-	USB_RMNET_MUX_XPORT_UNDEFINED,
-	USB_RMNET_MUX_XPORT_SDIO,
-	USB_RMNET_MUX_XPORT_SMD,
 };
 
 struct rmnet_mux_ctrl_dev {
@@ -176,7 +171,7 @@ struct rmnet_mux_dev {
 	struct rmnet_mux_ctrl_dev ctrl_dev;
 
 	u8 ifc_id;
-	enum usb_rmnet_mux_xport_type xport;
+	enum transport_type xport;
 	spinlock_t lock;
 	atomic_t online;
 	atomic_t notify_count;
@@ -290,18 +285,6 @@ static struct usb_gadget_strings *rmnet_mux_strings[] = {
 	&rmnet_mux_string_table,
 	NULL,
 };
-
-static char *xport_to_str(enum usb_rmnet_mux_xport_type t)
-{
-	switch (t) {
-	case USB_RMNET_MUX_XPORT_SDIO:
-		return "SDIO";
-	case USB_RMNET_MUX_XPORT_SMD:
-		return "SMD";
-	default:
-		return "UNDEFINED";
-	}
-}
 
 static struct rmnet_mux_ctrl_pkt *rmnet_mux_alloc_ctrl_pkt(unsigned len,
 							   gfp_t flags)
@@ -556,7 +539,7 @@ rmnet_mux_sdio_complete_epout(struct usb_ep *ep, struct usb_request *req)
 	int status = req->status;
 	int queue = 0;
 
-	if (dev->xport == USB_RMNET_MUX_XPORT_UNDEFINED) {
+	if (dev->xport == USB_GADGET_XPORT_UNDEF) {
 		dev_kfree_skb_any(skb);
 		req->buf = 0;
 		rmnet_mux_free_req(ep, req);
@@ -614,7 +597,7 @@ rmnet_mux_sdio_complete_epin(struct usb_ep *ep, struct usb_request *req)
 	struct usb_composite_dev *cdev = dev->cdev;
 	int status = req->status;
 
-	if (dev->xport == USB_RMNET_MUX_XPORT_UNDEFINED) {
+	if (dev->xport == USB_GADGET_XPORT_UNDEF) {
 		dev_kfree_skb_any(skb);
 		req->buf = 0;
 		rmnet_mux_free_req(ep, req);
@@ -797,7 +780,7 @@ rmnet_mux_smd_complete_epout(struct usb_ep *ep, struct usb_request *req)
 	int status = req->status;
 	int ret;
 
-	if (dev->xport == USB_RMNET_MUX_XPORT_UNDEFINED) {
+	if (dev->xport == USB_GADGET_XPORT_UNDEF) {
 		rmnet_mux_free_req(ep, req);
 		return;
 	}
@@ -857,7 +840,7 @@ static void rmnet_mux_smd_complete_epin(struct usb_ep *ep,
 	int status = req->status;
 	int schedule = 0;
 
-	if (dev->xport == USB_RMNET_MUX_XPORT_UNDEFINED) {
+	if (dev->xport == USB_GADGET_XPORT_UNDEF) {
 		rmnet_mux_free_req(ep, req);
 		return;
 	}
@@ -1209,7 +1192,7 @@ static void rmnet_mux_free_buf(struct rmnet_mux_dev *dev)
 		req = list_first_entry(pool, struct usb_request, list);
 		list_del(&req->list);
 		req->buf = NULL;
-		rmnet_mux_free_req(dev->epin, req);
+		rmnet_mux_free_req(dev->epout, req);
 	}
 
 	pool = &sdio_dev->rx_idle;
@@ -1218,7 +1201,7 @@ static void rmnet_mux_free_buf(struct rmnet_mux_dev *dev)
 		req = list_first_entry(pool, struct usb_request, list);
 		list_del(&req->list);
 		req->buf = NULL;
-		rmnet_mux_free_req(dev->epout, req);
+		rmnet_mux_free_req(dev->epin, req);
 	}
 
 	while ((skb = __skb_dequeue(&sdio_dev->tx_skb_queue)))
@@ -1232,7 +1215,7 @@ static void rmnet_mux_free_buf(struct rmnet_mux_dev *dev)
 	while (!list_empty(pool)) {
 		req = list_first_entry(pool, struct usb_request, list);
 		list_del(&req->list);
-		rmnet_mux_free_req(dev->epin, req);
+		rmnet_mux_free_req(dev->epout, req);
 	}
 
 	pool = &smd_dev->rx_idle;
@@ -1240,7 +1223,7 @@ static void rmnet_mux_free_buf(struct rmnet_mux_dev *dev)
 	while (!list_empty(pool)) {
 		req = list_first_entry(pool, struct usb_request, list);
 		list_del(&req->list);
-		rmnet_mux_free_req(dev->epout, req);
+		rmnet_mux_free_req(dev->epin, req);
 	}
 
 	/* free all usb requests in SMD rx queue */
@@ -1248,7 +1231,7 @@ static void rmnet_mux_free_buf(struct rmnet_mux_dev *dev)
 	while (!list_empty(pool)) {
 		req = list_first_entry(pool, struct usb_request, list);
 		list_del(&req->list);
-		rmnet_mux_free_req(dev->epout, req);
+		rmnet_mux_free_req(dev->epin, req);
 	}
 
 	pool = &ctrl_dev->tx_q;
@@ -1276,7 +1259,7 @@ static void rmnet_mux_disconnect_work(struct work_struct *w)
 	struct rmnet_mux_smd_dev *smd_dev = &dev->smd_dev;
 	struct rmnet_mux_ctrl_dev *ctrl_dev = &dev->ctrl_dev;
 
-	if (dev->xport == USB_RMNET_MUX_XPORT_SMD) {
+	if (dev->xport == USB_GADGET_XPORT_SMD) {
 		tasklet_kill(&smd_dev->smd_data.rx_tlet);
 		tasklet_kill(&smd_dev->smd_data.tx_tlet);
 	}
@@ -1414,8 +1397,8 @@ static ssize_t transport_store(
 {
 	struct rmnet_mux_dev *dev =  rmux_dev;
 	int value;
-	enum usb_rmnet_mux_xport_type given_xport;
-	enum usb_rmnet_mux_xport_type t;
+	enum transport_type given_xport;
+	enum transport_type t;
 	struct rmnet_mux_smd_dev *smd_dev = &dev->smd_dev;
 	struct rmnet_mux_sdio_dev *sdio_dev = &dev->sdio_dev;
 	struct list_head *pool;
@@ -1425,15 +1408,15 @@ static ssize_t transport_store(
 	unsigned long flags;
 
 	if (!atomic_read(&dev->online)) {
-		pr_debug("%s: usb cable is not connected\n", __func__);
+		pr_err("%s: usb cable is not connected\n", __func__);
 		return -EINVAL;
 	}
 
 	sscanf(buf, "%d", &value);
 	if (value)
-		given_xport = USB_RMNET_MUX_XPORT_SDIO;
+		given_xport = USB_GADGET_XPORT_SDIO;
 	else
-		given_xport = USB_RMNET_MUX_XPORT_SMD;
+		given_xport = USB_GADGET_XPORT_SMD;
 
 	if (given_xport == dev->xport) {
 		pr_err("%s: given_xport:%s cur_xport:%s doing nothing\n",
@@ -1447,14 +1430,14 @@ static ssize_t transport_store(
 
 	/* prevent any other pkts to/from usb  */
 	t = dev->xport;
-	dev->xport = USB_RMNET_MUX_XPORT_UNDEFINED;
-	if (t != USB_RMNET_MUX_XPORT_UNDEFINED) {
+	dev->xport = USB_GADGET_XPORT_UNDEF;
+	if (t != USB_GADGET_XPORT_UNDEF) {
 		usb_ep_fifo_flush(dev->epin);
 		usb_ep_fifo_flush(dev->epout);
 	}
 
 	switch (t) {
-	case USB_RMNET_MUX_XPORT_SDIO:
+	case USB_GADGET_XPORT_SDIO:
 		spin_lock_irqsave(&dev->lock, flags);
 		/* tx_idle */
 
@@ -1465,7 +1448,7 @@ static ssize_t transport_store(
 			req = list_first_entry(pool, struct usb_request, list);
 			list_del(&req->list);
 			req->buf = NULL;
-			rmnet_mux_free_req(dev->epin, req);
+			rmnet_mux_free_req(dev->epout, req);
 		}
 
 		/* rx_idle */
@@ -1475,7 +1458,7 @@ static ssize_t transport_store(
 			req = list_first_entry(pool, struct usb_request, list);
 			list_del(&req->list);
 			req->buf = NULL;
-			rmnet_mux_free_req(dev->epout, req);
+			rmnet_mux_free_req(dev->epin, req);
 		}
 
 		/* tx_skb_queue */
@@ -1489,7 +1472,7 @@ static ssize_t transport_store(
 
 		spin_unlock_irqrestore(&dev->lock, flags);
 		break;
-	case USB_RMNET_MUX_XPORT_SMD:
+	case USB_GADGET_XPORT_SMD:
 		/* close smd xport */
 		tasklet_kill(&smd_dev->smd_data.rx_tlet);
 		tasklet_kill(&smd_dev->smd_data.tx_tlet);
@@ -1500,7 +1483,7 @@ static ssize_t transport_store(
 		while (!list_empty(pool)) {
 			req = list_first_entry(pool, struct usb_request, list);
 			list_del(&req->list);
-			rmnet_mux_free_req(dev->epin, req);
+			rmnet_mux_free_req(dev->epout, req);
 		}
 
 		pool = &smd_dev->rx_idle;
@@ -1508,7 +1491,7 @@ static ssize_t transport_store(
 		while (!list_empty(pool)) {
 			req = list_first_entry(pool, struct usb_request, list);
 			list_del(&req->list);
-			rmnet_mux_free_req(dev->epout, req);
+			rmnet_mux_free_req(dev->epin, req);
 		}
 
 		/* free all usb requests in SMD rx queue */
@@ -1516,7 +1499,7 @@ static ssize_t transport_store(
 		while (!list_empty(pool)) {
 			req = list_first_entry(pool, struct usb_request, list);
 			list_del(&req->list);
-			rmnet_mux_free_req(dev->epout, req);
+			rmnet_mux_free_req(dev->epin, req);
 		}
 
 		spin_unlock_irqrestore(&dev->lock, flags);
@@ -1528,10 +1511,10 @@ static ssize_t transport_store(
 	dev->xport = given_xport;
 
 	switch (dev->xport) {
-	case USB_RMNET_MUX_XPORT_SDIO:
+	case USB_GADGET_XPORT_SDIO:
 		rmnet_mux_sdio_enable(dev);
 		break;
-	case USB_RMNET_MUX_XPORT_SMD:
+	case USB_GADGET_XPORT_SMD:
 		rmnet_mux_smd_enable(dev);
 		break;
 	default:
@@ -1640,14 +1623,11 @@ static void rmnet_mux_sdio_init(struct rmnet_mux_sdio_dev *sdio_dev)
 static void
 rmnet_mux_unbind(struct usb_configuration *c, struct usb_function *f)
 {
-/* Do not clear flags to avoid SMD open status mismatch */
-#if 0
 	struct rmnet_mux_dev *dev = container_of(f, struct rmnet_mux_dev,
 								function);
 	struct rmnet_mux_smd_dev *smd_dev = &dev->smd_dev;
 
 	smd_dev->smd_data.flags = 0;
-#endif
 }
 
 #if defined(CONFIG_DEBUG_FS)
@@ -1947,7 +1927,6 @@ static int rmnet_mux_ctrl_device_init(struct rmnet_mux_dev *dev)
 static int rmnet_smd_sdio_function_add(struct usb_configuration *c)
 {
 	struct rmnet_mux_dev *dev = rmux_dev;
-	int status;
 
 	if (!dev)
 		return -ENODEV;
@@ -1964,16 +1943,6 @@ static int rmnet_smd_sdio_function_add(struct usb_configuration *c)
 	dev->function.set_alt = rmnet_mux_set_alt;
 	dev->function.disable = rmnet_mux_disable;
 	dev->function.suspend = rmnet_mux_suspend;
-
-	if (rmnet_mux_string_defs[0].id == 0) {
-		status = usb_string_id(c->cdev);
-		if (status < 0) {
-			printk(KERN_ERR "%s: return %d\n", __func__, status);
-			return status;
-		}
-		rmnet_mux_string_defs[0].id = status;
-		rmnet_mux_interface_desc.iInterface = status;
-	}
 
 	return usb_add_function(c, &dev->function);
 }

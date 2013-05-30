@@ -27,10 +27,6 @@
 #include <linux/device.h>
 #include <linux/miscdevice.h>
 
-#define ADB_IOCTL_MAGIC 's'
-#define ADB_ERR_PAYLOAD_STUCK       _IOW(ADB_IOCTL_MAGIC, 0, unsigned)
-#define ADB_ATS_ENABLE       		_IOR(ADB_IOCTL_MAGIC, 1, unsigned)
-
 #define ADB_BULK_BUFFER_SIZE           4096
 
 /* number of tx requests to allocate */
@@ -118,7 +114,6 @@ static struct usb_descriptor_header *hs_adb_descs[] = {
 
 /* temporary variable used between adb_open() and adb_gadget_bind() */
 static struct adb_dev *_adb_dev;
-int board_get_usb_ats(void);
 
 static inline struct adb_dev *func_to_adb(struct usb_function *f)
 {
@@ -197,10 +192,9 @@ static void adb_complete_in(struct usb_ep *ep, struct usb_request *req)
 {
 	struct adb_dev *dev = _adb_dev;
 
-	if (req->status != 0) {
-		printk(KERN_INFO "[USB] %s: err (%d)\n", __func__, req->status);
+	if (req->status != 0)
 		atomic_set(&dev->error, 1);
-	}
+
 	adb_req_put(dev, &dev->tx_idle, req);
 
 	wake_up(&dev->write_wq);
@@ -211,10 +205,9 @@ static void adb_complete_out(struct usb_ep *ep, struct usb_request *req)
 	struct adb_dev *dev = _adb_dev;
 
 	dev->rx_done = 1;
-	if (req->status != 0) {
-		printk(KERN_INFO "[USB] %s: err (%d)\n", __func__, req->status);
+	if (req->status != 0)
 		atomic_set(&dev->error, 1);
-	}
+
 	wake_up(&dev->read_wq);
 }
 
@@ -452,54 +445,7 @@ static struct miscdevice adb_device = {
 	.fops = &adb_fops,
 };
 
-int htc_usb_enable_function(char *name, int ebl);
-static int adb_enable_open(struct inode *ip, struct file *fp)
-{
-	printk(KERN_INFO "[USB] enabling adb\n");
-	htc_usb_enable_function("adb", 1);
-	return 0;
-}
 
-static int adb_enable_release(struct inode *ip, struct file *fp)
-{
-	printk(KERN_INFO "[USB] disabling adb\n");
-	htc_usb_enable_function("adb", 0);
-	return 0;
-}
-
-static long adb_enable_ioctl(struct file *file,
-				unsigned int cmd, unsigned long arg)
-{
-	int rc = 0;
-
-	switch (cmd) {
-	case ADB_ERR_PAYLOAD_STUCK: {
-		printk(KERN_INFO "[USB] adbd read payload stuck (reset ADB)\n");
-		break;
-	}
-	case ADB_ATS_ENABLE: {
-		printk(KERN_INFO "[USB] ATS enable =  %d\n",board_get_usb_ats());
-		rc = put_user(board_get_usb_ats(),(int __user *)arg);
-		break;
-	}
-	default:
-		rc = -EINVAL;
-	}
-	return rc;
-}
-
-static const struct file_operations adb_enable_fops = {
-	.owner =   THIS_MODULE,
-	.open =    adb_enable_open,
-	.release = adb_enable_release,
-	.unlocked_ioctl	= adb_enable_ioctl,
-};
-
-static struct miscdevice adb_enable_device = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "android_adb_enable",
-	.fops = &adb_enable_fops,
-};
 
 
 static int
@@ -646,10 +592,6 @@ static int adb_setup(void)
 	if (ret)
 		goto err;
 
-	ret = misc_register(&adb_enable_device);
-	if (ret)
-		goto err;
-
 	return 0;
 
 err:
@@ -661,7 +603,6 @@ err:
 static void adb_cleanup(void)
 {
 	misc_deregister(&adb_device);
-	misc_deregister(&adb_enable_device);
 
 	kfree(_adb_dev);
 	_adb_dev = NULL;

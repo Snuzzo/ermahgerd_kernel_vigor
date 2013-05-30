@@ -45,7 +45,8 @@
 #define L_VAL_SCPLL_CAL_MIN	0x08 /* =  432 MHz with 27MHz source */
 #define L_VAL_SCPLL_CAL_MAX	0x1C /* = 1512 MHz with 27MHz source */
 
-#define MAX_VDD_SC		1250000 /* uV */
+#define MAX_VDD_SC		1300000 /* uV */
+#define MIN_VDD_SC		 600000 /* uV */
 #define MAX_VDD_MEM		1250000 /* uV */
 #define MAX_VDD_DIG		1200000 /* uV */
 #define MAX_AXI			 310500 /* KHz */
@@ -171,20 +172,20 @@ static uint32_t bus_perf_client;
 /* L2 frequencies = 2 * 27 MHz * L_VAL */
 static struct clkctl_l2_speed l2_freq_tbl_v2[] = {
 	[0]  = { MAX_AXI, 0, 0,    1000000, 1100000, 0},
-	[1]  = { 432000,  1, 0x08, 1000000, 1100000, 0},
-	[2]  = { 486000,  1, 0x09, 1000000, 1100000, 0},
-	[3]  = { 540000,  1, 0x0A, 1000000, 1100000, 0},
-	[4]  = { 594000,  1, 0x0B, 1000000, 1100000, 0},
+	[1]  = { 432000,  1, 0x08, 1000000, 1100000, 1},
+	[2]  = { 486000,  1, 0x09, 1000000, 1100000, 1},
+	[3]  = { 540000,  1, 0x0A, 1000000, 1100000, 1},
+	[4]  = { 594000,  1, 0x0B, 1000000, 1100000, 1},
 	[5]  = { 648000,  1, 0x0C, 1000000, 1100000, 1},
 	[6]  = { 702000,  1, 0x0D, 1100000, 1100000, 1},
 	[7]  = { 756000,  1, 0x0E, 1100000, 1100000, 1},
-	[8]  = { 810000,  1, 0x0F, 1100000, 1100000, 1},
-	[9]  = { 864000,  1, 0x10, 1100000, 1100000, 1},
+	[8]  = { 810000,  1, 0x0F, 1100000, 1100000, 2},
+	[9]  = { 864000,  1, 0x10, 1100000, 1100000, 2},
 	[10] = { 918000,  1, 0x11, 1100000, 1100000, 2},
 	[11] = { 972000,  1, 0x12, 1100000, 1100000, 2},
 	[12] = {1026000,  1, 0x13, 1100000, 1100000, 2},
-	[13] = {1080000,  1, 0x14, 1100000, 1200000, 2},
-	[14] = {1134000,  1, 0x15, 1100000, 1200000, 2},
+	[13] = {1080000,  1, 0x14, 1100000, 1200000, 3},
+	[14] = {1134000,  1, 0x15, 1100000, 1200000, 3},
 	[15] = {1188000,  1, 0x16, 1200000, 1200000, 3},
 	[16] = {1242000,  1, 0x17, 1200000, 1212500, 3},
 	[17] = {1296000,  1, 0x18, 1200000, 1225000, 3},
@@ -315,7 +316,7 @@ static struct clkctl_acpu_speed *acpu_freq_tbl;
 static struct clkctl_l2_speed *l2_freq_tbl = l2_freq_tbl_v2;
 static unsigned int l2_freq_tbl_size = ARRAY_SIZE(l2_freq_tbl_v2);
 
-static unsigned long acpuclk_8x60_get_rate(int cpu)
+unsigned long acpuclk_8x60_get_rate(int cpu)
 {
 	return drv_state.current_speed[cpu]->acpuclk_khz;
 }
@@ -668,7 +669,6 @@ out:
 		mutex_unlock(&drv_state.lock);
 	return rc;
 }
-
 #ifdef CONFIG_PERFLOCK
 unsigned int get_max_cpu_freq(void)
 {
@@ -679,6 +679,50 @@ unsigned int get_max_cpu_freq(void)
 	return f->acpuclk_khz;;
 }
 #endif
+#ifdef CONFIG_CPU_VOLTAGE_TABLE
+
+ssize_t acpuclk_get_vdd_levels_str(char *buf) {
+
+  int i, len = 0;
+
+  if (buf) {
+    mutex_lock(&drv_state.lock);
+
+    for (i = 0; acpu_freq_tbl[i].acpuclk_khz; i++) {
+      /* updated to use uv required by 8x60 architecture - faux123 */
+      len += sprintf(buf + len, "%8u: %8d\n", acpu_freq_tbl[i].acpuclk_khz, acpu_freq_tbl[i].vdd_sc );
+    }
+
+    mutex_unlock(&drv_state.lock);
+  }
+  return len;
+}
+
+/* updated to use uv required by 8x60 architecture - faux123 */
+void acpuclk_set_vdd(unsigned int khz, int vdd_uv) {
+
+  int i;
+  unsigned int new_vdd_uv;
+//  int vdd_uv;
+
+//  vdd_uv = vdd_mv * 1000;
+
+  mutex_lock(&drv_state.lock);
+
+  for (i = 0; acpu_freq_tbl[i].acpuclk_khz; i++) {
+    if (khz == 0)
+      new_vdd_uv = min(max((acpu_freq_tbl[i].vdd_sc + vdd_uv), (unsigned int)MIN_VDD_SC), (unsigned int)MAX_VDD_SC);
+    else if ( acpu_freq_tbl[i].acpuclk_khz == khz)
+      new_vdd_uv = min(max((unsigned int)vdd_uv, (unsigned int)MIN_VDD_SC), (unsigned int)MAX_VDD_SC);
+    else 
+      continue;
+
+    acpu_freq_tbl[i].vdd_sc = new_vdd_uv;
+  }
+
+  mutex_unlock(&drv_state.lock);
+}
+#endif  /* CONFIG_CPU_VOTALGE_TABLE */
 
 static void __init scpll_init(int sc_pll)
 {
@@ -869,6 +913,48 @@ static int __cpuinit acpuclock_cpu_callback(struct notifier_block *nfb,
 static struct notifier_block __cpuinitdata acpuclock_cpu_notifier = {
 	.notifier_call = acpuclock_cpu_callback,
 };
+
+#ifdef CONFIG_MSM_MPDEC
+uint32_t acpu_check_khz_value(unsigned long khz)
+{
+	struct clkctl_acpu_speed *f;
+
+	if (khz > 1512000)
+		return CONFIG_MSM_CPU_FREQ_MAX;
+
+	if (khz < 192000)
+		return CONFIG_MSM_CPU_FREQ_MIN;
+
+	for (f = acpu_freq_tbl_fast; f->acpuclk_khz != 0; f++) {
+		if (khz < 192000) {
+			if (f->acpuclk_khz == (khz*1000))
+				return f->acpuclk_khz;
+			if ((khz*1000) > f->acpuclk_khz) {
+				f++;
+				if ((khz*1000) < f->acpuclk_khz) {
+					f--;
+					return f->acpuclk_khz;
+				}
+				f--;
+			}
+		}
+		if (f->acpuclk_khz == khz) {
+			return 1;
+		}
+		if (khz > f->acpuclk_khz) {
+			f++;
+			if (khz < f->acpuclk_khz) {
+				f--;
+				return f->acpuclk_khz;
+			}
+			f--;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(acpu_check_khz_value);
+#endif
 
 static unsigned int __init select_freq_plan(void)
 {

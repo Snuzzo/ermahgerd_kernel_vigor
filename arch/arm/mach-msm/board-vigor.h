@@ -104,6 +104,11 @@
 /* MHL */
 #define VIGOR_GPIO_MHL_RST_N   		(43)
 #define VIGOR_GPIO_MHL_INTR_N  		(58)
+#define VIGOR_GPIO_MHL_WAKE_UP		(62)
+#define VIGOR_GPIO_MHL_RESET		(70)
+#define VIGOR_GPIO_MHL_INT		(71)
+#define VIGOR_GPIO_MHL_USB_SWITCH	(99) 
+#define VIGOR_GPIO_MHL_USB_EN			(139)
 #define VIGOR_GPIO_MHL_SCL			(170)
 #define VIGOR_GPIO_MHL_SDA			(171)
 #define VIGOR_GPIO_MHL_HPD			(172)

@@ -1415,6 +1415,7 @@ static int vigor_phy_init_seq[] = { 0x06, 0x36, 0x0C, 0x31, 0x31, 0x32, 0x1, 0x0
 static struct msm_otg_platform_data msm_otg_pdata = {
 	.phy_init_seq		= vigor_phy_init_seq,
 	.mode			= USB_PERIPHERAL,
+	.mode      		= USB_OTG,
 	.otg_control		= OTG_PMIC_CONTROL,
 	.phy_type		= CI_45NM_INTEGRATED_PHY,
 	.vbus_power		= msm_hsusb_vbus_power,
@@ -7538,9 +7539,9 @@ static struct platform_device *vigor_devices[] __initdata = {
 	&asoc_mvs_dai1,
 #endif
 
-#if defined(CONFIG_USB_GADGET_MSM_72K) || defined(CONFIG_USB_EHCI_HCD)
+	&msm_device_hsusb_host,
 	&msm_device_otg,
-#endif
+	
 #ifdef CONFIG_BATTERY_MSM
 	&msm_batt_device,
 #endif

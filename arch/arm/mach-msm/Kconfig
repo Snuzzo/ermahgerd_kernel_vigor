@@ -1529,6 +1529,40 @@ config MSM_MPDEC
 	  This enables kernel based multi core control.
 	  (up/down hotplug based on load)
 
+config MSM_MPDEC
+    bool "Enable kernel based mpdecision"
+    depends on MSM_SMP
+    default n
+    help
+      This enables kernel based multi core control.
+      (up/down hotplug based on load)
+
+choice
+    prompt "Default MPdecision setting"
+    help
+      This option sets the MPdecision startup settings.
+      If in doubt, select 'enabled'.
+
+config MSM_MPDEC_ENABLED
+    bool "enabled"
+    depends on MSM_MPDEC
+    help
+      Build MPdecision into kernel with full control over
+      multi processor decisions by default.
+
+config MSM_MPDEC_DISABLED
+    bool "disabled"
+    depends on MSM_MPDEC
+    help
+      Build MPdecision into kernel with only control over
+      screen on/off multi processor decisions by default.
+
+endchoice
+
+config CPU_VOLTAGE_TABLE
+  	bool "Enable CPU Voltage Table via sysfs for adjustements"
+  	default n
+
 if CPU_FREQ_MSM
 
 config MSM_CPU_FREQ_SET_MIN_MAX
@@ -2275,5 +2309,12 @@ config REMOVE_EBI1_FIXED_CLK
 	default n
 	help
 		use for 2x Radio
+
+config FORCE_FAST_CHARGE
+	bool "Force AC charge mode at will"
+	default y
+	help
+		A simple sysfs interface to force adapters that
+		are detected as USB to charge as AC.
 
 endif

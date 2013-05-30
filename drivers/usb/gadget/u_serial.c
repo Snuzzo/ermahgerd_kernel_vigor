@@ -55,7 +55,7 @@
  * is managed in userspace ... OBEX, PTP, and MTP have been mentioned.
  */
 
-#define PREFIX	"ttyHSUSB"
+#define PREFIX	"ttyGS"
 
 /*
  * gserial is the lifecycle interface, used by USB functions
@@ -371,15 +371,10 @@ __acquires(&port->port_lock)
 */
 {
 	struct list_head	*pool = &port->write_pool;
-	struct usb_ep		*in;
+	struct usb_ep		*in = port->port_usb->in;
 	int			status = 0;
 	static long 		prev_len;
 	bool			do_tty_wake = false;
-
-	if (port->port_usb)
-		in = port->port_usb->in;
-	else
-		return 0;
 
 	while (!list_empty(pool)) {
 		struct usb_request	*req;
@@ -391,7 +386,9 @@ __acquires(&port->port_lock)
 		req = list_entry(pool->next, struct usb_request, list);
 		len = gs_send_packet(port, req->buf, TX_BUF_SIZE);
 		if (len == 0) {
-			/* Queue zero length packet */
+			/* Queue zero length packet explicitly to make it
+			 * work with UDCs which don't support req->zero flag
+			 */
 			if (prev_len && (prev_len % in->maxpacket == 0)) {
 				req->length = 0;
 				list_del(&req->list);
@@ -416,7 +413,6 @@ __acquires(&port->port_lock)
 
 		req->length = len;
 		list_del(&req->list);
-		req->zero = (gs_buf_data_avail(&port->port_write_buf) == 0);
 
 		pr_vdebug(PREFIX "%d: tx len=%d, 0x%02x 0x%02x 0x%02x ...\n",
 				port->port_num, len, *((u8 *)req->buf),
@@ -468,13 +464,8 @@ __acquires(&port->port_lock)
 */
 {
 	struct list_head	*pool = &port->read_pool;
-	struct usb_ep		*out;
+	struct usb_ep		*out = port->port_usb->out;
 	unsigned		started = 0;
-
-	if (port->port_usb)
-		out = port->port_usb->out;
-	else
-		return 0;
 
 	while (!list_empty(pool)) {
 		struct usb_request	*req;
@@ -736,14 +727,9 @@ static int gs_alloc_requests(struct usb_ep *ep, struct list_head *head,
 static int gs_start_io(struct gs_port *port)
 {
 	struct list_head	*head = &port->read_pool;
-	struct usb_ep		*ep;
+	struct usb_ep		*ep = port->port_usb->out;
 	int			status;
 	unsigned		started;
-
-	if (port->port_usb)
-		ep = port->port_usb->out;
-	else
-		return -EIO;
 
 	/* Allocate RX and TX I/O buffers.  We can't easily do this much
 	 * earlier (with GFP_KERNEL) because the requests are coupled to
@@ -1361,9 +1347,6 @@ int gserial_setup(struct usb_gadget *g, unsigned count)
 	if (count == 0 || count > N_PORTS)
 		return -EINVAL;
 
-	if (gs_tty_driver)
-		return 0;
-
 	gs_tty_driver = alloc_tty_driver(count);
 	if (!gs_tty_driver)
 		return -ENOMEM;
@@ -1387,10 +1370,6 @@ int gserial_setup(struct usb_gadget *g, unsigned count)
 			B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	gs_tty_driver->init_termios.c_ispeed = 9600;
 	gs_tty_driver->init_termios.c_ospeed = 9600;
-
-	gs_tty_driver->init_termios.c_lflag = 0;
-	gs_tty_driver->init_termios.c_iflag = 0;
-	gs_tty_driver->init_termios.c_oflag = 0;
 
 	coding.dwDTERate = cpu_to_le32(9600);
 	coding.bCharFormat = 8;

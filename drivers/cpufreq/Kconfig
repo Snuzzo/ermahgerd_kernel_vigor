@@ -109,17 +109,23 @@ config CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 	  loading your cpufreq low-level hardware driver, using the
 	  'interactive' governor for latency-sensitive workloads.
 
-config CPU_FREQ_DEFAULT_GOV_INTERACTIVEX2
-	bool "interactiveX"
-	select CPU_FREQ_GOV_INTERACTIVEX2
-	help
-	   Use the CPU governor 'interactiveX2' by imoseyon as default.
-
 config CPU_FREQ_DEFAULT_GOV_LIONHEART
 	bool "lionheart"
 	select CPU_FREQ_GOV_LIONHEART
 	help
 	   Use the CPU governor 'lionheart' as default.
+
+config CPU_FREQ_DEFAULT_GOV_INTELLIDEMAND
+	bool "intellidemand"
+	select CPU_FREQ_GOV_INTELLIDEMAND
+	help
+	   Use the CPU governor 'intellidemand' as default.
+
+config CPU_FREQ_DEFAULT_GOV_WHEATLEY
+	bool "wheatley"
+	select CPU_FREQ_GOV_WHEATLEY
+	help
+	   Use the CPU governor 'wheatley' as default.
 
 endchoice
 
@@ -224,20 +230,27 @@ config CPU_FREQ_GOV_CONSERVATIVE
 
 	  If in doubt, say N.
 
-config CPU_FREQ_GOV_INTERACTIVEX2
-	tristate "'interactiveX2' cpufreq governor"	
-	depends on CPU_FREQ
-	help
-	select CPU_FREQ
-	   Use the CPU governor 'interactiveX2' by imoseyon.
-
-	   If in doubt, say N.
-
 config CPU_FREQ_GOV_LIONHEART
 	tristate "'Lionheart' cpufreq governor"
 	depends on CPU_FREQ
 	help
 	   Use the CPU governor 'lionheart'.
+
+	   If in doubt, say N.
+
+config CPU_FREQ_GOV_INTELLIDEMAND
+	tristate "'intellidemand' cpufreq governor"
+	depends on CPU_FREQ
+	help
+	   Use the CPU governor 'intellidemand'.
+
+	   If in doubt, say N.
+
+config CPU_FREQ_GOV_WHEATLEY
+	tristate "'wheatley' cpufreq governor"
+	depends on CPU_FREQ
+	help
+	   Use the CPU governor 'wheatley'.
 
 	   If in doubt, say N.
 
